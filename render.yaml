@@ -1,0 +1,8 @@
+services:
+  - type: web
+    name: sharelab
+    runtime: node
+    plan: free
+    buildCommand: npm test
+    startCommand: npm start
+    healthCheckPath: /

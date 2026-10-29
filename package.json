@@ -1,0 +1,12 @@
+{
+  "name": "sharelab",
+  "version": "1.0.0",
+  "description": "ShareLab - trusted sharing of underused campus equipment and spaces (zero-dependency Node + SQLite)",
+  "main": "server.js",
+  "engines": { "node": ">=22.5" },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server.js",
+    "test": "node --disable-warning=ExperimentalWarning test.js"
+  },
+  "license": "MIT"
+}

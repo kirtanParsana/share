@@ -1,0 +1,13 @@
+# Local SQLite database and transient journal files
+*.db
+*.db-shm
+*.db-wal
+
+# macOS / editor / Node artifacts
+.DS_Store
+.AppleDouble
+node_modules/
+.env
+.env.*
+!.env.example
+coverage/
