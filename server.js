@@ -4,12 +4,36 @@ const { DatabaseSync } = require('node:sqlite');
 const http = require('node:http'), fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto');
 
 const PORT = process.env.PORT || 3000;
-const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
-const defaultDbPath = isServerless ? path.join('/tmp', 'sharelab.db') : path.join(__dirname, 'sharelab.db');
-const dbPath = process.env.DB_PATH || defaultDbPath;
-const db = new DatabaseSync(dbPath);
-db.exec(`PRAGMA journal_mode=WAL;
-CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,name,email UNIQUE,role,pw,verified INT DEFAULT 1,late INT DEFAULT 0,noshow INT DEFAULT 0);
+
+function resolveDbPath() {
+  if (process.env.DB_PATH) return process.env.DB_PATH;
+  if (
+    process.env.VERCEL ||
+    process.env.VERCEL_ENV ||
+    process.env.NOW_REGION ||
+    process.env.AWS_LAMBDA_FUNCTION_NAME ||
+    process.env.LAMBDA_TASK_ROOT ||
+    (typeof __dirname === 'string' && __dirname.startsWith('/var/task'))
+  ) {
+    return path.join('/tmp', 'sharelab.db');
+  }
+  try {
+    const testFile = path.join(__dirname, '.write-test-' + process.pid);
+    fs.writeFileSync(testFile, '');
+    fs.unlinkSync(testFile);
+    return path.join(__dirname, 'sharelab.db');
+  } catch {
+    return path.join(require('node:os').tmpdir(), 'sharelab.db');
+  }
+}
+
+const db = new DatabaseSync(resolveDbPath());
+try {
+  db.exec('PRAGMA journal_mode=WAL;');
+} catch {
+  try { db.exec('PRAGMA journal_mode=DELETE;'); } catch {}
+}
+db.exec(`CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,name,email UNIQUE,role,pw,verified INT DEFAULT 1,late INT DEFAULT 0,noshow INT DEFAULT 0);
 CREATE TABLE IF NOT EXISTS creds(u,k,st,PRIMARY KEY(u,k));
 CREATE TABLE IF NOT EXISTS res(id TEXT PRIMARY KEY,n,c,l,o,m,req,mode,q INT,rule,active INT DEFAULT 1);
 CREATE TABLE IF NOT EXISTS bk(id TEXT PRIMARY KEY,r,u,day,s INT,h INT,purpose,st,why,t INT,ci,co,late INT DEFAULT 0,ovd INT DEFAULT 0,rem INT DEFAULT 0);
