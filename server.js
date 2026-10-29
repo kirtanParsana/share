@@ -4,7 +4,10 @@ const { DatabaseSync } = require('node:sqlite');
 const http = require('node:http'), fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto');
 
 const PORT = process.env.PORT || 3000;
-const db = new DatabaseSync(process.env.DB_PATH || path.join(__dirname, 'sharelab.db'));
+const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+const defaultDbPath = isServerless ? path.join('/tmp', 'sharelab.db') : path.join(__dirname, 'sharelab.db');
+const dbPath = process.env.DB_PATH || defaultDbPath;
+const db = new DatabaseSync(dbPath);
 db.exec(`PRAGMA journal_mode=WAL;
 CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,name,email UNIQUE,role,pw,verified INT DEFAULT 1,late INT DEFAULT 0,noshow INT DEFAULT 0);
 CREATE TABLE IF NOT EXISTS creds(u,k,st,PRIMARY KEY(u,k));
@@ -256,6 +259,13 @@ const server = http.createServer(async (req, res) => {
     send(res, 404, { error: 'Not found' });
   } catch (e) { send(res, e.code >= 400 && e.code < 600 ? e.code : 500, { error: e.code ? e.message : 'Server error' }); if (!e.code) console.error(e); }
 });
-setInterval(() => { try { tick(); } catch (e) { console.error(e); } }, 6e4);
+const ticker = setInterval(() => { try { tick(); } catch (e) { console.error(e); } }, 6e4);
+if (ticker.unref) ticker.unref();
+
+const handler = (req, res) => {
+  server.emit('request', req, res);
+};
+handler.server = server;
+
 if (require.main === module) server.listen(PORT, () => console.log(`ShareLab running on http://localhost:${PORT}`));
-module.exports = { server };
+module.exports = handler;
