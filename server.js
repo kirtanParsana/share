@@ -1,5 +1,6 @@
 'use strict';
 // ShareLab backend: libSQL / Turso & SQLite compatible.
+try { require('dotenv').config(); } catch {}
 const http = require('node:http'), fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto');
 const { AsyncLocalStorage } = require('node:async_hooks');
 
