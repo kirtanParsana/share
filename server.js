@@ -22,7 +22,6 @@ function getClient() {
     });
   }
   if (isServerless) {
-    // If running on Vercel without Turso credentials, use web client or warn
     throw new Error('TURSO_DATABASE_URL is missing. Please configure TURSO_DATABASE_URL and TURSO_AUTH_TOKEN in Vercel Environment Variables.');
   }
   const { createClient } = require('@libsql/client');
@@ -355,7 +354,7 @@ const authed = async req => {
   return s ? await one('SELECT * FROM users WHERE id=?', s.u) : null;
 };
 
-const server = http.createServer(async (req, res) => {
+async function handler(req, res) {
   const url = new URL(req.url, 'http://x');
   try {
     if (url.pathname === '/' || url.pathname === '/index.html') {
@@ -401,13 +400,22 @@ const server = http.createServer(async (req, res) => {
     send(res, e.code >= 400 && e.code < 600 ? e.code : 500, { error: e.message || 'Server error' });
     if (!e.code) console.error(e);
   }
-});
+}
+
+const server = http.createServer(handler);
 
 if (!isServerless) {
   const ticker = setInterval(() => { tick().catch(console.error); }, 6e4);
   if (ticker.unref) ticker.unref();
 }
 
-server.server = server;
-if (require.main === module) server.listen(PORT, () => console.log(`ShareLab running on http://localhost:${PORT}`));
-module.exports = server;
+if (!isServerless && require.main === module) {
+  server.listen(PORT, () => console.log(`ShareLab running on http://localhost:${PORT}`));
+}
+
+handler.server = server;
+handler.default = handler;
+
+module.exports = handler;
+module.exports.default = handler;
+module.exports.server = server;
