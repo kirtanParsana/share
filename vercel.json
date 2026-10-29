@@ -1,11 +1,8 @@
 {
   "version": 2,
-  "env": {
-    "DB_PATH": "/tmp/sharelab.db"
-  },
   "rewrites": [
     {
-      "source": "/(.*)",
+      "source": "/api/(.*)",
       "destination": "/server.js"
     }
   ]

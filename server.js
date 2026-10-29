@@ -1,32 +1,44 @@
 'use strict';
 // ShareLab backend: libSQL / Turso & SQLite compatible.
-const { createClient } = require('@libsql/client');
-const { AsyncLocalStorage } = require('node:async_hooks');
 const http = require('node:http'), fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto');
+const { AsyncLocalStorage } = require('node:async_hooks');
 
 const PORT = process.env.PORT || 3000;
+const isServerless = Boolean(
+  process.env.VERCEL ||
+  process.env.VERCEL_ENV ||
+  process.env.NOW_REGION ||
+  process.env.AWS_LAMBDA_FUNCTION_NAME ||
+  process.env.LAMBDA_TASK_ROOT ||
+  (typeof __dirname === 'string' && __dirname.startsWith('/var/task'))
+);
 
-function getClientConfig() {
+function getClient() {
   if (process.env.TURSO_DATABASE_URL) {
-    return {
+    const { createClient } = require('@libsql/client/web');
+    return createClient({
       url: process.env.TURSO_DATABASE_URL,
       authToken: process.env.TURSO_AUTH_TOKEN,
-    };
+    });
   }
-  const isServerless = Boolean(
-    process.env.VERCEL ||
-    process.env.VERCEL_ENV ||
-    process.env.NOW_REGION ||
-    process.env.AWS_LAMBDA_FUNCTION_NAME ||
-    process.env.LAMBDA_TASK_ROOT ||
-    (typeof __dirname === 'string' && __dirname.startsWith('/var/task'))
-  );
-  const defaultPath = isServerless ? path.join('/tmp', 'sharelab.db') : path.join(__dirname, 'sharelab.db');
-  const dbPath = process.env.DB_PATH || defaultPath;
-  return { url: 'file:' + dbPath };
+  if (isServerless) {
+    // If running on Vercel without Turso credentials, use web client or warn
+    throw new Error('TURSO_DATABASE_URL is missing. Please configure TURSO_DATABASE_URL and TURSO_AUTH_TOKEN in Vercel Environment Variables.');
+  }
+  const { createClient } = require('@libsql/client');
+  const dbPath = process.env.DB_PATH || path.join(__dirname, 'sharelab.db');
+  return createClient({ url: 'file:' + dbPath });
 }
 
-const client = createClient(getClientConfig());
+let clientInstance = null;
+const client = new Proxy({}, {
+  get(_, prop) {
+    if (!clientInstance) clientInstance = getClient();
+    const val = clientInstance[prop];
+    return typeof val === 'function' ? val.bind(clientInstance) : val;
+  }
+});
+
 const txStorage = new AsyncLocalStorage();
 const target = () => txStorage.getStore() || client;
 
@@ -62,7 +74,9 @@ async function initDb() {
   await seed();
 }
 const ensureInit = () => (initPromise = initPromise || initDb());
-ensureInit().catch(console.error);
+if (!isServerless) {
+  ensureInit().catch(console.error);
+}
 
 const CRED = { safety: 'Makerspace safety training', electronics: 'Electronics lab induction', cnc: 'CNC operator certificate' };
 const CATS = ['Makerspace', 'Electronics', 'Computing', 'Rooms', 'Media'], CONDS = ['Excellent', 'Good', 'Worn', 'Damaged'];
@@ -344,12 +358,15 @@ const authed = async req => {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   try {
-    await ensureInit();
     if (url.pathname === '/' || url.pathname === '/index.html') {
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' });
-      return res.end(fs.readFileSync(path.join(__dirname, 'public', 'index.html')));
+      const p = path.join(__dirname, 'public', 'index.html');
+      if (fs.existsSync(p)) {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' });
+        return res.end(fs.readFileSync(p));
+      }
     }
     if (!url.pathname.startsWith('/api/')) return send(res, 404, { error: 'Not found' });
+    await ensureInit();
     if (url.pathname === '/api/login' && req.method === 'POST') {
       if (limited(req.socket.remoteAddress)) return send(res, 429, { error: 'Too many attempts. Wait a minute.' });
       const b = await body(req), u = await one('SELECT * FROM users WHERE email=?', str(b.email, 100));
@@ -381,18 +398,16 @@ const server = http.createServer(async (req, res) => {
     }
     send(res, 404, { error: 'Not found' });
   } catch (e) {
-    send(res, e.code >= 400 && e.code < 600 ? e.code : 500, { error: e.code ? e.message : 'Server error' });
+    send(res, e.code >= 400 && e.code < 600 ? e.code : 500, { error: e.message || 'Server error' });
     if (!e.code) console.error(e);
   }
 });
 
-const ticker = setInterval(() => { tick().catch(console.error); }, 6e4);
-if (ticker.unref) ticker.unref();
+if (!isServerless) {
+  const ticker = setInterval(() => { tick().catch(console.error); }, 6e4);
+  if (ticker.unref) ticker.unref();
+}
 
-const handler = (req, res) => {
-  server.emit('request', req, res);
-};
-handler.server = server;
-
+server.server = server;
 if (require.main === module) server.listen(PORT, () => console.log(`ShareLab running on http://localhost:${PORT}`));
-module.exports = handler;
+module.exports = server;
